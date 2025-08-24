@@ -99,18 +99,19 @@ services:
     command: >
       '
       set -eo pipefail;
-      
+
+      echo "$$BACKUP_HOME" "$$CLOUDSDK_CONFIG" "$$BACKUP_HOME/.gsutil" /backups/daily /backups/binlog
       mkdir -p "$$BACKUP_HOME" "$$CLOUDSDK_CONFIG" "$$BACKUP_HOME/.gsutil" /backups/daily /backups/binlog
       [ -f "$$BOTO_CONFIG" ] || touch "$$BOTO_CONFIG"
 
       while true; do
         ts=$(date +%F-%H%M);
 
-        echo "[backup] logical dump $ts";
+        echo "[backup] logical dump $$ts";
         dump() { command -v mysqldump >/dev/null && mysqldump "$@" || mariadb-dump "$@"; }
         dump --single-transaction --quick --hex-blob --no-tablespaces \
           -hmysql -uappuser -p"$MYSQL_PASSWORD" appdb \
-          | gzip -c > /backups/daily/appdb-$ts.sql.gz;
+          | gzip -c > /backups/daily/appdb-$$ts.sql.gz;
 
         # Binlogs (skip if disabled/empty)
         if [ -d /var/lib/mysql-bin ] && compgen -G "/var/lib/mysql-bin/*" > /dev/null; then
@@ -128,7 +129,7 @@ services:
         gsutil -m -o "GSUtil:state_dir=$$BACKUP_HOME/.gsutil" rsync -r /backups/daily gs://$GCS_BUCKET/mysql/daily/ || true
 
         find /backups/daily -type f -mtime +7 -delete || true
-        echo "BACKUP OK ts=$ts"
+        echo "BACKUP OK ts=$$ts"
         sleep 21600  # every 6 hours;
       done
       '
