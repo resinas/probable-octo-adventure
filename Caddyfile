@@ -1,4 +1,20 @@
-yourdomain.com {
-    reverse_proxy localhost:8080
-    encode gzip
+{$DOMAIN} {
+  encode zstd gzip
+  tls {$EMAIL}
+
+  @health path /actuator/health
+  handle @health {
+    reverse_proxy app:8080
+  }
+
+  reverse_proxy app:8080 {
+    header_up X-Forwarded-Proto {scheme}
+    header_up X-Forwarded-For {remote}
+    header_up X-Forwarded-Host {host}
+  }
+}
+
+# Optional: redirect HTTP hostnames to HTTPS (if you ever expose :80 separately)
+:80 {
+  redir https://{$DOMAIN}{uri}
 }
