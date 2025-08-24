@@ -99,16 +99,17 @@ services:
     command: >
       '
       set -eo pipefail;
-      mkdir -p /backups/daily /backups/binlog;
+      mkdir -p "$HOME" "$CLOUDSDK_CONFIG" /backups/daily /backups/binlog;
 
       while true; do
         ts=$(date +%F-%H%M);
+
         echo "[backup] logical dump $ts";
-        mysqldump --single-transaction --quick --hex-blob \
+        dump() { command -v mysqldump >/dev/null && mysqldump "$@" || mariadb-dump "$@"; }
+        dump --single-transaction --quick --hex-blob --no-tablespaces \
           -hmysql -uappuser -p"$MYSQL_PASSWORD" appdb \
           | gzip -c > /backups/daily/appdb-$ts.sql.gz;
 
-        # binlogs: only if directory exists AND has files
         if [ -d /var/lib/mysql-bin ] && compgen -G "/var/lib/mysql-bin/*" > /dev/null; then
           echo "[backup] syncing binlogs";
           cp -n /var/lib/mysql-bin/* /backups/binlog/ || true
@@ -118,20 +119,22 @@ services:
         fi
 
         echo "[backup] rsync uploads to GCS";
-        gsutil -m rsync -r /uploads gs://$GCS_BUCKET/uploads/;
+        gsutil -m rsync -r /uploads gs://$GCS_BUCKET/uploads/ || true
 
-        echo "[backup] push SQL dumps + binlogs to GCS";
-        gsutil -m rsync -r /backups/daily gs://$GCS_BUCKET/mysql/daily/;
+        echo "[backup] rsync SQL dumps";
+        gsutil -m rsync -r /backups/daily gs://$GCS_BUCKET/mysql/daily/ || true
 
-        # prune local >7 days (GCS pruning handled by lifecycle policy)
-        find /backups/daily -type f -mtime +7 -delete || true;
-
-        sleep 21600;  # 6 hours
+        find /backups/daily -type f -mtime +7 -delete || true
+        echo "BACKUP OK ts=$ts"
+        sleep 21600  # every 6 hours;
       done
       '
+
     environment:
       MYSQL_PASSWORD: "${MYSQL_PASSWORD}"
       GCS_BUCKET: "${GCS_BUCKET}"  # set in .env
+      HOME: /backups/home                 # <-- writable HOME for gsutil
+      CLOUDSDK_CONFIG: /backups/gcloud    # <-- writable gcloud config dir
       # If using a key file:
       # GOOGLE_APPLICATION_CREDENTIALS: /secrets/sa.json
     volumes:
