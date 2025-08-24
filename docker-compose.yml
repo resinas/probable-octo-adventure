@@ -100,8 +100,8 @@ services:
       '
       set -eo pipefail;
       
-      mkdir -p "$BACKUP_HOME" "$CLOUDSDK_CONFIG" "$BACKUP_HOME/.gsutil" /backups/daily /backups/binlog
-      [ -f "$BOTO_CONFIG" ] || touch "$BOTO_CONFIG"
+      mkdir -p "$$BACKUP_HOME" "$$CLOUDSDK_CONFIG" "$$BACKUP_HOME/.gsutil" /backups/daily /backups/binlog
+      [ -f "$$BOTO_CONFIG" ] || touch "$$BOTO_CONFIG"
 
       while true; do
         ts=$(date +%F-%H%M);
@@ -116,16 +116,16 @@ services:
         if [ -d /var/lib/mysql-bin ] && compgen -G "/var/lib/mysql-bin/*" > /dev/null; then
           echo "[backup] syncing binlogs";
           cp -n /var/lib/mysql-bin/* /backups/binlog/ || true
-          gsutil -m -o "GSUtil:state_dir=$BACKUP_HOME/.gsutil" rsync -r /backups/binlog gs://$GCS_BUCKET/mysql/binlog/ || true
+          gsutil -m -o "GSUtil:state_dir=$$BACKUP_HOME/.gsutil" rsync -r /backups/binlog gs://$GCS_BUCKET/mysql/binlog/ || true
         else
           echo "[backup] binlogs disabled or empty; skipping";
         fi
 
         echo "[backup] rsync uploads to GCS";
-        gsutil -m -o "GSUtil:state_dir=$BACKUP_HOME/.gsutil" rsync -r /uploads gs://$GCS_BUCKET/uploads/ || true
+        gsutil -m -o "GSUtil:state_dir=$$BACKUP_HOME/.gsutil" rsync -r /uploads gs://$GCS_BUCKET/uploads/ || true
 
         echo "[backup] rsync SQL dumps";
-        gsutil -m -o "GSUtil:state_dir=$BACKUP_HOME/.gsutil" rsync -r /backups/daily gs://$GCS_BUCKET/mysql/daily/ || true
+        gsutil -m -o "GSUtil:state_dir=$$BACKUP_HOME/.gsutil" rsync -r /backups/daily gs://$GCS_BUCKET/mysql/daily/ || true
 
         find /backups/daily -type f -mtime +7 -delete || true
         echo "BACKUP OK ts=$ts"
