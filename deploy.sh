@@ -156,6 +156,7 @@ chown debian:debian /home/debian/app/.env
 chmod 600 /home/debian/app/.env
 
 # Create systemd unit for the compose stack
+# systemd unit runs as 'debian' with docker group
 cat >/etc/systemd/system/app-stack.service <<SYSEOF
 [Unit]
 Description=App + DB + Caddy (Docker Compose)
@@ -164,6 +165,9 @@ After=docker.service
 
 [Service]
 Type=oneshot
+User=debian
+Group=debian
+SupplementaryGroups=docker
 WorkingDirectory=${APP_DIR}
 ExecStart=/usr/bin/docker compose up -d
 ExecStop=/usr/bin/docker compose down
@@ -176,15 +180,8 @@ SYSEOF
 
 systemctl daemon-reload
 systemctl enable app-stack
-
-# First boot
 sudo -u debian /usr/bin/docker compose -f ${APP_DIR}/docker-compose.yml pull || true
-sudo -u debian /usr/bin/docker compose -f ${APP_DIR}/docker-compose.yml up -d
-
-# Ensure VM restarts keep it running
 systemctl start app-stack
-
-# Done
 EOF
 )
 
