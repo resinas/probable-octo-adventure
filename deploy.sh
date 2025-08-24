@@ -3,11 +3,13 @@ set -euo pipefail
 
 # ---------- CONFIG (edit or export as env before running) ----------
 PROJECT_ID="${PROJECT_ID:-your-project-id}"
-ZONE="${ZONE:-europe-west1-b}"
+ZONE="${ZONE:-europe-southwest1-a}"
 VM_NAME="${VM_NAME:-conferia-vm}"
-MACHINE_TYPE="${MACHINE_TYPE:-e2-standard-2}"   # or e2-medium
+MACHINE_TYPE="${MACHINE_TYPE:-e2-medium}"   # or e2-standard-2
 DISK_SIZE_GB="${DISK_SIZE_GB:-50}"
 DISK_TYPE="${DISK_TYPE:-pd-ssd}"
+
+OS_USER="${OS_USER:-appsvc}"
 
 # domain + email for Caddy/Let's Encrypt
 DOMAIN="${DOMAIN:-example.com}"
@@ -41,7 +43,8 @@ echo "VM:             $VM_NAME  ($MACHINE_TYPE, ${DISK_SIZE_GB}GB ${DISK_TYPE})"
 echo "Domain/Email:   $DOMAIN / $EMAIL"
 echo "Spring Mail:    $SPRING_MAIL_HOST:$SPRING_MAIL_PORT / $SPRING_MAIL_USERNAME"
 echo "Repo:           $REPO_URL @ $REPO_BRANCH"
-echo "Bucket: gs://$GCS_BUCKET  |  SA: $CUSTOM_SA_NAME@$PROJECT_ID.iam.gserviceaccount.com"
+echo "Bucket:         gs://$GCS_BUCKET  |  SA: $CUSTOM_SA_NAME@$PROJECT_ID.iam.gserviceaccount.com"
+echo "OS User:        $OS_USER"
 echo
 
 # 0) Enable required APIs (safe to re-run)
@@ -112,8 +115,13 @@ SPRING_MAIL_PORT=$(META SPRING_MAIL_PORT)
 SPRING_MAIL_USERNAME=$(META SPRING_MAIL_USERNAME)
 SPRING_MAIL_PASSWORD=$(META SPRING_MAIL_PASSWORD)
 
-USER_HOME="/home/debian"
-APP_DIR="${USER_HOME}/app"
+OS_USER=$(META OS_USER)
+
+# Create service user if missing
+if ! id -u "$OS_USER" >/dev/null 2>&1; then
+  useradd -m -s /bin/bash "$OS_USER"
+fi
+
 
 # Install Docker + Compose
 apt-get update -y
@@ -128,20 +136,24 @@ echo \
 apt-get update -y
 apt-get install -y docker-ce docker-ce-cli containerd.io docker-compose-plugin
 
-# Let 'debian' use docker
-usermod -aG docker debian
+
+# Allow the service user to talk to Docker
+usermod -aG docker "$OS_USER"
+
+# App directory under the service user’s home
+APP_DIR="/home/${OS_USER}/app"
+sudo -u "$OS_USER" mkdir -p "$APP_DIR"
+cd "$APP_DIR"
 
 # Fetch app repo
-sudo -u debian mkdir -p "$APP_DIR"
-cd "$APP_DIR"
 if [[ ! -d .git ]]; then
-  sudo -u debian git clone -b "$REPO_BRANCH" "$REPO_URL" .
+  sudo -u ${OS_USER} git clone -b "$REPO_BRANCH" "$REPO_URL" .
 else
-  sudo -u debian git fetch && sudo -u debian git checkout "$REPO_BRANCH" && sudo -u debian git pull
+  sudo -u ${OS_USER} git fetch && sudo -u ${OS_USER} git checkout "$REPO_BRANCH" && sudo -u ${OS_USER} git pull
 fi
 
 # Write .env (used by docker-compose.yml)
-cat >/home/debian/app/.env <<ENVEOF
+cat > "${APP_DIR}/.env" <<ENVEOF
 MYSQL_ROOT_PASSWORD=${MYSQL_ROOT_PASSWORD}
 MYSQL_PASSWORD=${MYSQL_PASSWORD}
 DOMAIN=${DOMAIN}
@@ -152,11 +164,11 @@ SPRING_MAIL_PORT=${SPRING_MAIL_PORT}
 SPRING_MAIL_USERNAME=${SPRING_MAIL_USERNAME}
 SPRING_MAIL_PASSWORD=${SPRING_MAIL_PASSWORD}
 ENVEOF
-chown debian:debian /home/debian/app/.env
-chmod 600 /home/debian/app/.env
+chown "${OS_USER}:${OS_USER}" "${APP_DIR}/.env"
+chmod 600 "${APP_DIR}/.env"
 
 # Create systemd unit for the compose stack
-# systemd unit runs as 'debian' with docker group
+# systemd unit runs as OS_USER with docker group
 cat >/etc/systemd/system/app-stack.service <<SYSEOF
 [Unit]
 Description=App + DB + Caddy (Docker Compose)
@@ -165,8 +177,8 @@ After=docker.service
 
 [Service]
 Type=oneshot
-User=debian
-Group=debian
+User=${OS_USER}
+Group=${OS_USER}
 SupplementaryGroups=docker
 WorkingDirectory=${APP_DIR}
 ExecStart=/usr/bin/docker compose up -d
@@ -180,7 +192,7 @@ SYSEOF
 
 systemctl daemon-reload
 systemctl enable app-stack
-sudo -u debian /usr/bin/docker compose -f ${APP_DIR}/docker-compose.yml pull || true
+sudo -u ${OS_USER} /usr/bin/docker compose -f ${APP_DIR}/docker-compose.yml pull || true
 systemctl start app-stack
 EOF
 )
@@ -199,13 +211,13 @@ gcloud compute instances create "$VM_NAME" \
   --service-account "$CUSTOM_SA_EMAIL" \
   --metadata-from-file startup-script=<(echo "$STARTUP_SCRIPT") \
   --metadata \
-DOMAIN="$DOMAIN",EMAIL="$EMAIL",REPO_URL="$REPO_URL",REPO_BRANCH="$REPO_BRANCH",MYSQL_ROOT_PASSWORD="$MYSQL_ROOT_PASSWORD",MYSQL_PASSWORD="$MYSQL_PASSWORD",GCS_BUCKET="$GCS_BUCKET",SPRING_MAIL_HOST="$SPRING_MAIL_HOST",SPRING_MAIL_PORT="$SPRING_MAIL_PORT",SPRING_MAIL_USERNAME="$SPRING_MAIL_USERNAME",SPRING_MAIL_PASSWORD="$SPRING_MAIL_PASSWORD" 
+DOMAIN="$DOMAIN",EMAIL="$EMAIL",REPO_URL="$REPO_URL",REPO_BRANCH="$REPO_BRANCH",MYSQL_ROOT_PASSWORD="$MYSQL_ROOT_PASSWORD",MYSQL_PASSWORD="$MYSQL_PASSWORD",GCS_BUCKET="$GCS_BUCKET",SPRING_MAIL_HOST="$SPRING_MAIL_HOST",SPRING_MAIL_PORT="$SPRING_MAIL_PORT",SPRING_MAIL_USERNAME="$SPRING_MAIL_USERNAME",SPRING_MAIL_PASSWORD="$SPRING_MAIL_PASSWORD",OS_USER="$OS_USER" 
 
 echo
 echo "VM provisioning kicked off. Fetch the external IP:"
-gcloud compute instances describe "$VM_NAME" --zone "$ZONE" \
+gcloud compute instances describe "$VM_NAME" --project "$PROJECT_ID" --zone "$ZONE" \
   --format='value(networkInterfaces[0].accessConfigs[0].natIP)'
 
 echo
 echo "➡ Point your domain's A record to that IP. Caddy will auto-issue TLS once DNS propagates."
-echo "➡ To watch first boot logs: gcloud compute ssh $VM_NAME --zone $ZONE -- journalctl -u app-stack -f"
+echo "➡ To watch first boot logs: gcloud compute ssh $VM_NAME --project $PROJECT_ID --zone $ZONE -- journalctl -u app-stack -f"

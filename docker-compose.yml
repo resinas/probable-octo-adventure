@@ -35,7 +35,7 @@ services:
     networks: [ web ]
 
   app:
-    image: your-registry/your-app:latest
+    image: resinas/backend:latest
     restart: unless-stopped
     environment:
       SPRING_PROFILES_ACTIVE: prod
