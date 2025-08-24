@@ -1,0 +1,151 @@
+version: "3.9"
+
+volumes:
+  mysql_data: {}
+  caddy_data: {}
+  caddy_config: {}
+
+networks:
+  web: {}
+
+services:
+  mysql:
+    image: percona/percona-server:8.0
+    restart: unless-stopped
+    command: ["--defaults-file=/etc/mysql/conf.d/my.cnf"]
+    environment:
+      MYSQL_ROOT_PASSWORD: "${MYSQL_ROOT_PASSWORD}"   # set in .env
+      MYSQL_DATABASE: "appdb"
+      MYSQL_USER: "appuser"
+      MYSQL_PASSWORD: "${MYSQL_PASSWORD}"             # set in .env
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ./mysql/my.cnf:/etc/mysql/conf.d/my.cnf:ro
+      - ./mysql/init:/docker-entrypoint-initdb.d:ro   # optional seed scripts
+      - ./mysql/binlogs:/var/lib/mysql-bin            # binlogs if enabled
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h localhost -u root -p$${MYSQL_ROOT_PASSWORD} --silent"]
+      interval: 20s
+      timeout: 5s
+      retries: 10
+    user: "999:999"                     # mysql inside container runs as mysql user
+    cap_drop: ["ALL"]
+    security_opt:
+      - no-new-privileges:true
+    networks: [ web ]
+
+  app:
+    image: your-registry/your-app:latest
+    restart: unless-stopped
+    environment:
+      SPRING_PROFILES_ACTIVE: prod
+      SPRING_DATASOURCE_URL: "jdbc:mysql://mysql:3306/appdb?useSSL=false&allowPublicKeyRetrieval=true&characterEncoding=utf8&serverTimezone=UTC"
+      SPRING_DATASOURCE_USERNAME: "appuser"
+      SPRING_DATASOURCE_PASSWORD: "${MYSQL_PASSWORD}"
+      JAVA_TOOL_OPTIONS: "-XX:MaxRAMPercentage=75.0 -Dfile.encoding=UTF-8"
+      SPRING_MAIL_HOST: "${SPRING_MAIL_HOST}"
+      SPRING_MAIL_PORT: "${SPRING_MAIL_PORT}"
+      SPRING_MAIL_AUTH: yes
+      SPRING_MAIL_USERNAME: "${SPRING_MAIL_USERNAME}"
+      SPRING_MAIL_PASSWORD: "${SPRING_MAIL_PASSWORD}"
+      FILE_UPLOAD_DIR: /app/uploads
+    volumes:
+      - ./uploads:/app/uploads
+    depends_on:
+      mysql:
+        condition: service_healthy
+    read_only: true
+    tmpfs:
+      - /tmp:mode=1777,size=64m
+    cap_drop: ["ALL"]
+    security_opt:
+      - no-new-privileges:true
+    user: "1000:1000"
+    networks: [ web ]
+    expose:
+      - "8080"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8080/actuator/health | grep -q '\"status\":\"UP\"'"]
+      interval: 20s
+      timeout: 3s
+      retries: 5
+
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      DOMAIN: "${DOMAIN}"
+      EMAIL: "${EMAIL}"
+    volumes:
+      - caddy_data:/data
+      - caddy_config:/config
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+    depends_on: [ app ]
+    read_only: true
+    tmpfs:
+      - /tmp:mode=1777,size=32m
+    cap_drop: ["ALL"]
+    security_opt:
+      - no-new-privileges:true
+    networks: [ web ]
+
+  backup:
+    image: google/cloud-sdk:slim
+    restart: unless-stopped
+    entrypoint: ["/bin/bash","-lc"]
+    command: >
+      '
+      set -eo pipefail;
+      mkdir -p /backups/daily /backups/binlog;
+
+      while true; do
+        ts=$(date +%F-%H%M);
+        echo "[backup] logical dump $ts";
+        mysqldump --single-transaction --quick --hex-blob \
+          -hmysql -uappuser -p"$MYSQL_PASSWORD" appdb \
+          | gzip -c > /backups/daily/appdb-$ts.sql.gz;
+
+        # binlogs: only if directory exists AND has files
+        if [ -d /var/lib/mysql-bin ] && compgen -G "/var/lib/mysql-bin/*" > /dev/null; then
+          echo "[backup] syncing binlogs";
+          cp -n /var/lib/mysql-bin/* /backups/binlog/ || true
+          gsutil -m rsync -r /backups/binlog gs://$GCS_BUCKET/mysql/binlog/ || true
+        else
+          echo "[backup] binlogs disabled or empty; skipping";
+        fi
+
+        echo "[backup] rsync uploads to GCS";
+        gsutil -m rsync -r /uploads gs://$GCS_BUCKET/uploads/;
+
+        echo "[backup] push SQL dumps + binlogs to GCS";
+        gsutil -m rsync -r /backups/daily gs://$GCS_BUCKET/mysql/daily/;
+
+        # prune local >7 days (GCS pruning handled by lifecycle policy)
+        find /backups/daily -type f -mtime +7 -delete || true;
+
+        sleep 21600;  # 6 hours
+      done
+      '
+    environment:
+      MYSQL_PASSWORD: "${MYSQL_PASSWORD}"
+      GCS_BUCKET: "${GCS_BUCKET}"  # set in .env
+      # If using a key file:
+      # GOOGLE_APPLICATION_CREDENTIALS: /secrets/sa.json
+    volumes:
+      - ./mysql/binlogs:/var/lib/mysql-bin:ro
+      - mysql_data:/var/lib/mysql:ro
+      - ./backups:/backups
+      - ./uploads:/uploads:ro                 # <--- read-only mount to back up uploads
+      # - ./secrets:/secrets:ro
+    depends_on:
+      - mysql
+    read_only: true
+    tmpfs:
+      - /tmp:mode=1777,size=32m
+    cap_drop: ["ALL"]
+    security_opt:
+      - no-new-privileges:true
+    networks: [ web ]
