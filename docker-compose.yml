@@ -28,7 +28,6 @@ services:
       interval: 20s
       timeout: 5s
       retries: 10
-    user: "999:999"                     # mysql inside container runs as mysql user
     cap_drop: ["ALL"]
     security_opt:
       - no-new-privileges:true
@@ -87,13 +86,14 @@ services:
     read_only: true
     tmpfs:
       - /tmp:mode=1777,size=32m
-    cap_drop: ["ALL"]
+    cap_add:
+    - NET_BIND_SERVICE
     security_opt:
       - no-new-privileges:true
     networks: [ web ]
 
   backup:
-    image: google/cloud-sdk:slim
+    image: ./backup
     restart: unless-stopped
     entrypoint: ["/bin/bash","-lc"]
     command: >
