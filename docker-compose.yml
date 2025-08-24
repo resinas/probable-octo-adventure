@@ -59,7 +59,7 @@ services:
     cap_drop: ["ALL"]
     security_opt:
       - no-new-privileges:true
-    user: "1000:1000"
+    user: "${APP_UID}:${APP_GID}"
     networks: [ web ]
     expose:
       - "8080"

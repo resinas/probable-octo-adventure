@@ -122,6 +122,9 @@ if ! id -u "$OS_USER" >/dev/null 2>&1; then
   useradd -m -s /bin/bash "$OS_USER"
 fi
 
+APP_UID="$(id -u "$OS_USER")"
+APP_GID="$(id -g "$OS_USER")"
+
 
 # Install Docker + Compose
 apt-get update -y
@@ -140,10 +143,13 @@ apt-get install -y docker-ce docker-ce-cli containerd.io docker-compose-plugin
 # Allow the service user to talk to Docker
 usermod -aG docker "$OS_USER"
 
+
 # App directory under the service user’s home
 APP_DIR="/home/${OS_USER}/app"
-sudo -u "$OS_USER" mkdir -p "$APP_DIR"
+sudo -u "$OS_USER" mkdir -p "$APP_DIR" "$APP_DIR/uploads"
 cd "$APP_DIR"
+chown -R "$OS_USER:$OS_USER" "$APP_DIR/uploads"
+
 
 # Fetch app repo
 if [[ ! -d .git ]]; then
@@ -163,6 +169,8 @@ SPRING_MAIL_HOST=${SPRING_MAIL_HOST}
 SPRING_MAIL_PORT=${SPRING_MAIL_PORT}
 SPRING_MAIL_USERNAME=${SPRING_MAIL_USERNAME}
 SPRING_MAIL_PASSWORD=${SPRING_MAIL_PASSWORD}
+APP_UID=${APP_UID}
+APP_GID=${APP_GID}
 ENVEOF
 chown "${OS_USER}:${OS_USER}" "${APP_DIR}/.env"
 chmod 600 "${APP_DIR}/.env"
@@ -192,10 +200,10 @@ SYSEOF
 
 systemctl daemon-reload
 systemctl enable app-stack
-sudo -u ${OS_USER} /usr/bin/docker compose -f ${APP_DIR}/docker-compose.yml pull || true
 systemctl start app-stack
 EOF
 )
+#sudo -u ${OS_USER} /usr/bin/docker compose -f ${APP_DIR}/docker-compose.yml pull || true
 
 # Create the VM (idempotent-ish; will fail if the name already exists)
 gcloud compute instances create "$VM_NAME" \
