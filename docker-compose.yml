@@ -99,7 +99,9 @@ services:
     command: >
       '
       set -eo pipefail;
-      mkdir -p "$HOME" "$CLOUDSDK_CONFIG" /backups/daily /backups/binlog;
+      
+      mkdir -p "$BACKUP_HOME" "$CLOUDSDK_CONFIG" "$BACKUP_HOME/.gsutil" /backups/daily /backups/binlog
+      [ -f "$BOTO_CONFIG" ] || touch "$BOTO_CONFIG"
 
       while true; do
         ts=$(date +%F-%H%M);
@@ -110,19 +112,20 @@ services:
           -hmysql -uappuser -p"$MYSQL_PASSWORD" appdb \
           | gzip -c > /backups/daily/appdb-$ts.sql.gz;
 
+        # Binlogs (skip if disabled/empty)
         if [ -d /var/lib/mysql-bin ] && compgen -G "/var/lib/mysql-bin/*" > /dev/null; then
           echo "[backup] syncing binlogs";
           cp -n /var/lib/mysql-bin/* /backups/binlog/ || true
-          gsutil -m rsync -r /backups/binlog gs://$GCS_BUCKET/mysql/binlog/ || true
+          gsutil -m -o "GSUtil:state_dir=$BACKUP_HOME/.gsutil" rsync -r /backups/binlog gs://$GCS_BUCKET/mysql/binlog/ || true
         else
           echo "[backup] binlogs disabled or empty; skipping";
         fi
 
         echo "[backup] rsync uploads to GCS";
-        gsutil -m rsync -r /uploads gs://$GCS_BUCKET/uploads/ || true
+        gsutil -m -o "GSUtil:state_dir=$BACKUP_HOME/.gsutil" rsync -r /uploads gs://$GCS_BUCKET/uploads/ || true
 
         echo "[backup] rsync SQL dumps";
-        gsutil -m rsync -r /backups/daily gs://$GCS_BUCKET/mysql/daily/ || true
+        gsutil -m -o "GSUtil:state_dir=$BACKUP_HOME/.gsutil" rsync -r /backups/daily gs://$GCS_BUCKET/mysql/daily/ || true
 
         find /backups/daily -type f -mtime +7 -delete || true
         echo "BACKUP OK ts=$ts"
@@ -133,8 +136,10 @@ services:
     environment:
       MYSQL_PASSWORD: "${MYSQL_PASSWORD}"
       GCS_BUCKET: "${GCS_BUCKET}"  # set in .env
-      HOME: /backups/home                 # <-- writable HOME for gsutil
+      BACKUP_HOME: /backups/home                 # <-- writable HOME for gsutil
       CLOUDSDK_CONFIG: /backups/gcloud    # <-- writable gcloud config dir
+      XDG_CONFIG_HOME: /backups/gcloud    # some tools honor this too
+      BOTO_CONFIG: /backups/home/.boto    # explicit boto config file      
       # If using a key file:
       # GOOGLE_APPLICATION_CREDENTIALS: /secrets/sa.json
     volumes:
