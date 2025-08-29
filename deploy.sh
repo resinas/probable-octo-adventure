@@ -146,17 +146,20 @@ usermod -aG docker "$OS_USER"
 
 # App directory under the service user’s home
 APP_DIR="/home/${OS_USER}/app"
-sudo -u "$OS_USER" mkdir -p "$APP_DIR" "$APP_DIR/uploads"
+sudo -u "$OS_USER" mkdir -p "$APP_DIR"
 cd "$APP_DIR"
-chown -R "$OS_USER:$OS_USER" "$APP_DIR/uploads"
-
 
 # Fetch app repo
 if [[ ! -d .git ]]; then
-  sudo -u ${OS_USER} git clone -b "$REPO_BRANCH" "$REPO_URL" .
+  sudo -u ${OS_USER} git clone -b "${REPO_BRANCH}" "${REPO_URL}" .
 else
-  sudo -u ${OS_USER} git fetch && sudo -u ${OS_USER} git checkout "$REPO_BRANCH" && sudo -u ${OS_USER} git pull
+  sudo -u ${OS_USER} git fetch && sudo -u ${OS_USER} git checkout "${REPO_BRANCH}" && sudo -u ${OS_USER} git pull
 fi
+
+# Create uploads dir
+sudo -u ${OS_USER} mkdir -p "$APP_DIR/uploads"
+chown -R "$OS_USER:$OS_USER" "$APP_DIR/uploads"
+
 
 # Write .env (used by docker-compose.yml)
 cat > "${APP_DIR}/.env" <<ENVEOF
@@ -204,6 +207,8 @@ systemctl start app-stack
 EOF
 )
 #sudo -u ${OS_USER} /usr/bin/docker compose -f ${APP_DIR}/docker-compose.yml pull || true
+
+echo "$STARTUP_SCRIPT" > startup.sh
 
 # Create the VM (idempotent-ish; will fail if the name already exists)
 gcloud compute instances create "$VM_NAME" \
