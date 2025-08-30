@@ -48,6 +48,8 @@ services:
       SPRING_MAIL_USERNAME: "${SPRING_MAIL_USERNAME}"
       SPRING_MAIL_PASSWORD: "${SPRING_MAIL_PASSWORD}"
       FILE_UPLOAD_DIR: /app/uploads
+      LANG: C.UTF-8
+      LC_ALL: C.UTF-8      
     volumes:
       - ./uploads:/app/uploads
     depends_on:
