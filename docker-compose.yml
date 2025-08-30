@@ -38,7 +38,7 @@ services:
     restart: unless-stopped
     environment:
       SPRING_PROFILES_ACTIVE: prod
-      SPRING_DATASOURCE_URL: "jdbc:mysql://mysql:3306/appdb?useSSL=false&allowPublicKeyRetrieval=true&characterEncoding=utf8&serverTimezone=UTC"
+      SPRING_DATASOURCE_URL: "jdbc:mysql://mysql:3306/appdb?useSSL=false&allowPublicKeyRetrieval=true&characterEncoding=utf8&serverTimezone=UTC&useUnicode=true&connectionCollation=utf8mb4_0900_ai_ci"
       SPRING_DATASOURCE_USERNAME: "appuser"
       SPRING_DATASOURCE_PASSWORD: "${MYSQL_PASSWORD}"
       JAVA_TOOL_OPTIONS: "-XX:MaxRAMPercentage=75.0 -Dfile.encoding=UTF-8"
@@ -133,7 +133,6 @@ services:
         sleep 21600  # every 6 hours;
       done
       '
-
     environment:
       MYSQL_PASSWORD: "${MYSQL_PASSWORD}"
       GCS_BUCKET: "${GCS_BUCKET}"  # set in .env
