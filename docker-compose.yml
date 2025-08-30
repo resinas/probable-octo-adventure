@@ -112,7 +112,7 @@ services:
         echo "[backup] logical dump $$ts";
         dump() { command -v mysqldump >/dev/null && mysqldump "$@" || mariadb-dump "$@"; }
         dump --single-transaction --quick --hex-blob --no-tablespaces \
-          -hmysql -uappuser -p"$MYSQL_PASSWORD" appdb \
+          -hmysql -uappuser -p"$$MYSQL_PASSWORD" appdb \
           | gzip -c > /backups/daily/appdb-$$ts.sql.gz;
 
         # Binlogs (skip if disabled/empty)
@@ -151,7 +151,8 @@ services:
       - ./uploads:/uploads:ro                 # <--- read-only mount to back up uploads
       # - ./secrets:/secrets:ro
     depends_on:
-      - mysql
+      mysql:
+        condition: service_healthy
     read_only: true
     tmpfs:
       - /tmp:mode=1777,size=32m
