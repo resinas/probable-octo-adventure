@@ -102,7 +102,7 @@ services:
       '
       set -eo pipefail;
 
-      echo "$$BACKUP_HOME" "$$CLOUDSDK_CONFIG" "$$BACKUP_HOME/.gsutil" /backups/daily /backups/binlog
+      echo "$$BACKUP_HOME" "$$CLOUDSDK_CONFIG" "$$BACKUP_HOME/.gsutil" /backups/daily /backups/binlog;
       mkdir -p "$$BACKUP_HOME" "$$CLOUDSDK_CONFIG" "$$BACKUP_HOME/.gsutil" /backups/daily /backups/binlog
       [ -f "$$BOTO_CONFIG" ] || touch "$$BOTO_CONFIG"
 
