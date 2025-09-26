@@ -16,7 +16,7 @@ DOMAIN="${DOMAIN:-example.com}"
 EMAIL="${EMAIL:-admin@example.com}"
 
 # Git repo containing docker-compose.yml, Caddyfile, etc.
-REPO_URL="${REPO_URL:-https://github.com/you/your-app-repo.git}"
+REPO_URL="${REPO_URL:-https://github.com/resinas/probable-octo-adventure.git}"
 REPO_BRANCH="${REPO_BRANCH:-main}"
 
 # DB secrets (used to write .env on the VM)
